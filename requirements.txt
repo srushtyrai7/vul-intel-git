@@ -1,0 +1,9 @@
+python-dotenv
+requests
+supabase
+langchain
+langchain-google-genai
+langchain-groq
+fastapi
+uvicorn
+pydantic
