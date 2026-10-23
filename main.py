@@ -58,6 +58,32 @@ def record_decision(d: Decision):
         "asset_id": d.asset_id,
         "action": d.action,
     }).execute().data
+    import repo_scan
+from pydantic import BaseModel, Field
+
+class RepoScanRequest(BaseModel):
+    repo_url: str
+    asset_criticality: int = Field(10, ge=1, le=10)
+    include_llm: bool = True
+    include_rag: bool = True
+
+@app.post("/scan-repo")
+def scan_repo_route(body: RepoScanRequest):
+    try:
+        return repo_scan.scan_repo(
+            repo_url=body.repo_url,
+            asset_criticality=body.asset_criticality,
+            include_llm=body.include_llm,
+            include_rag=body.include_rag,
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
+    except Exception as exc:
+        return {"error": f"scan failed: {exc}"}
+
+@app.get("/scan-repo")
+def scan_repo_get(repo_url: str, asset_criticality: int = 10):
+    return scan_repo_route(RepoScanRequest(repo_url=repo_url, asset_criticality=asset_criticality))
 
 @app.get("/dashboard")
 def dashboard():
