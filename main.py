@@ -3,8 +3,10 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
+
+import repo_scan
 
 load_dotenv()
 sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
@@ -35,6 +37,12 @@ class AskPayload(BaseModel):
     question: str
     asset_criticality: float = 5.0
 
+class RepoScanRequest(BaseModel):
+    repo_url: str
+    asset_criticality: int = Field(10, ge=1, le=10)
+    include_llm: bool = True
+    include_rag: bool = True
+
 @app.get("/")
 def home():
     return {"status": "ok", "service": "vuln-intel-api"}
@@ -58,14 +66,11 @@ def record_decision(d: Decision):
         "asset_id": d.asset_id,
         "action": d.action,
     }).execute().data
-    import repo_scan
-from pydantic import BaseModel, Field
 
-class RepoScanRequest(BaseModel):
-    repo_url: str
-    asset_criticality: int = Field(10, ge=1, le=10)
-    include_llm: bool = True
-    include_rag: bool = True
+@app.get("/dashboard")
+def dashboard():
+    assets = sb.table("assets").select("id", count="exact").execute().count or 0
+    return {"total_assets": assets, "note": "add CVE stats here as data grows"}
 
 @app.post("/scan-repo")
 def scan_repo_route(body: RepoScanRequest):
@@ -84,8 +89,3 @@ def scan_repo_route(body: RepoScanRequest):
 @app.get("/scan-repo")
 def scan_repo_get(repo_url: str, asset_criticality: int = 10):
     return scan_repo_route(RepoScanRequest(repo_url=repo_url, asset_criticality=asset_criticality))
-
-@app.get("/dashboard")
-def dashboard():
-    assets = sb.table("assets").select("id", count="exact").execute().count or 0
-    return {"total_assets": assets, "note": "add CVE stats here as data grows"}
