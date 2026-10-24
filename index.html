@@ -114,6 +114,10 @@
   .fxcmd code{display:block;background:#0a111a;border:1px solid var(--border);border-left:3px solid var(--cyan);border-radius:8px;padding:10px 78px 10px 12px;font-family:var(--mono);font-size:12.5px;color:#9fe8f5;overflow-x:auto;white-space:pre-wrap}
   .copybtn{position:absolute;top:8px;right:8px}
   .fxmeta{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}
+  /* paste & scan */
+  .pastebox{margin-top:14px;border:1px dashed var(--border);border-radius:12px;padding:12px 14px;background:var(--panel2)}
+  .pastebox textarea{width:100%;margin-top:9px;font-family:var(--mono);font-size:12.5px;color:var(--text);background:#0a111a;border:1px solid var(--border);border-radius:8px;padding:10px;resize:vertical}
+  .pastebox textarea:focus{outline:1px solid var(--cyan)}
 </style>
 </head>
 <body>
@@ -157,6 +161,21 @@
     <label class="muted"><input type="checkbox" id="autoAlert" checked> auto-alert after scan</label>
   </div>
   <div class="muted" id="alertMsg" style="margin-top:6px"></div>
+  <div class="pastebox">
+    <div class="row" style="justify-content:space-between">
+      <b style="font-size:13px">📄 No repo? Paste &amp; scan <span class="muted" style="font-weight:400">— requirements.txt · pip freeze output · package.json · npm ls --json</span></b>
+      <span class="muted" style="font-size:11.5px" id="pasteMsg"></span>
+    </div>
+    <textarea id="pasteText" rows="6" spellcheck="false" placeholder="django==3.0.1
+requests==2.19.1
+pyyaml==5.1
+…or paste a package.json / npm ls --json output"></textarea>
+    <div class="row" style="margin-top:8px">
+      <button class="ghost mini" id="pasteExample">🧪 load example</button>
+      <button id="pasteScanBtn">🔍 Scan pasted list</button>
+      <span class="muted" style="font-size:11.5px">same formula, same ranking, same fix plans — no GitHub needed</span>
+    </div>
+  </div>
   <div class="chips" id="scanChips"></div>
   <div id="scanOut"></div>
 </section>
@@ -396,6 +415,39 @@ function copyFix(btn, id){
 
 $('#fxovl').addEventListener('click', e => { if(e.target.id === 'fxovl') closeFix(); });
 document.addEventListener('keydown', e => { if(e.key === 'Escape') closeFix(); });
+
+/* ================= paste & scan ================= */
+const PASTE_EXAMPLE = `django==3.0.1
+requests==2.19.1
+pyyaml==5.1
+jinja2==2.11.0
+cryptography==2.8
+sqlalchemy==1.3.0`;
+$('#pasteExample').addEventListener('click', () => {
+  $('#pasteText').value = PASTE_EXAMPLE;
+  toast('example pasted — hit “Scan pasted list”', true);
+});
+$('#pasteScanBtn').addEventListener('click', async e => {
+  const btn = e.target; btn.disabled = true;
+  $('#pasteMsg').textContent = 'scanning pasted list…';
+  try{
+    const d = await api('/scan-text', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({text: $('#pasteText').value, asset_criticality: crit(),
+        include_llm: $('#llm').checked, include_rag: $('#rag').checked,
+        notify: $('#autoAlert').checked, webhook_url: $('#webhook').value.trim() || undefined})}, 240000);
+    if(d && d.error){
+      $('#pasteMsg').innerHTML = `<span style="color:var(--red)">✗ ${esc(d.error)}</span>`;
+      toast('paste scan failed', false);
+    }else{
+      $('#pasteMsg').textContent = '';
+      renderScan(d);
+      const n = d && d.summary ? d.summary.total_findings : '?';
+      toast(`pasted scan done — ${n} finding(s), no repo needed`, true);
+      document.getElementById('scanChips').scrollIntoView({behavior:'smooth', block:'start'});
+    }
+  }catch(err){ $('#pasteMsg').textContent = '✗ ' + String(err).slice(0,120); }
+  finally{ btn.disabled = false; }
+});
 
 /* ================= ask ================= */
 function miniMd(src){
