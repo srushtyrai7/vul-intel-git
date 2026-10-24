@@ -103,6 +103,17 @@
   .dl{display:flex;gap:8px;flex-wrap:wrap}
   .dl div{border:1px solid var(--border);border-radius:8px;padding:6px 11px;font-size:11.5px;background:var(--panel2)}
   .dl b{color:var(--green);font-family:var(--mono)} .dl s{color:var(--red);text-decoration:none;font-family:var(--mono)}
+  /* fix-plan popup */
+  .fxovl{position:fixed;inset:0;background:rgba(4,8,14,.72);display:none;z-index:50;padding:24px}
+  .fxovl.open{display:flex;align-items:center;justify-content:center}
+  .fxbox{background:var(--panel);border:1px solid var(--cyan);border-radius:14px;max-width:640px;width:100%;max-height:86vh;overflow:auto;padding:20px 24px;box-shadow:0 12px 50px rgba(0,0,0,.55)}
+  .fxbox h3{font-size:17px}
+  .fxrow{margin-top:13px;font-size:13.5px;line-height:1.5}
+  .fxrow b.k{color:var(--dim);display:inline-block;min-width:110px}
+  .fxcmd{position:relative;margin-top:7px}
+  .fxcmd code{display:block;background:#0a111a;border:1px solid var(--border);border-left:3px solid var(--cyan);border-radius:8px;padding:10px 78px 10px 12px;font-family:var(--mono);font-size:12.5px;color:#9fe8f5;overflow-x:auto;white-space:pre-wrap}
+  .copybtn{position:absolute;top:8px;right:8px}
+  .fxmeta{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}
 </style>
 </head>
 <body>
@@ -174,6 +185,17 @@
       <button class="ghost" id="addAsset">+ Add</button>
     </div>
   </section>
+</div>
+
+<!-- ============ FIX PLAN POPUP ============ -->
+<div class="fxovl" id="fxovl">
+  <div class="fxbox" role="dialog" aria-modal="true">
+    <div class="row" style="justify-content:space-between;align-items:flex-start">
+      <h3 id="fxTitle">Fix plan</h3>
+      <button class="ghost mini" onclick="closeFix()">✕ close</button>
+    </div>
+    <div id="fxBody"></div>
+  </div>
 </div>
 
 <footer>VulnIntel demo console · single file · zero dependencies · API base is configurable in the header</footer>
@@ -258,6 +280,8 @@ function renderScan(d){
     })() : 'off'}</b></span>`;
 
   const f = [...(d.findings||[])].sort((a,b) => (b.real_risk ?? -1) - (a.real_risk ?? -1));
+  LAST_SCAN = f;
+  LAST_SCAN_REPO = (d.repo || d.repo_url || $('#repo').value.trim() || 'repo');
   const sevOf = x => x.severity || (x.cvss == null ? 'unscored'
     : x.cvss >= 9 ? 'critical' : x.cvss >= 7 ? 'high' : x.cvss >= 4 ? 'medium' : 'low');
   const rows = f.map((x,i) => {
@@ -272,7 +296,8 @@ function renderScan(d){
       <td><span class="sev ${esc(sevOf(x).toLowerCase())}">${esc(sevOf(x))}</span></td>
       <td class="num"><span class="risk">${x.real_risk==null?'—':num(x.real_risk)}</span>
         <span class="bar"><i style="width:${Math.min(100,(x.real_risk||0)/5*100)}%"></i></span></td>
-      <td>${x.fixed ? `<span class="fix">${esc(x.fixed)}</span>` : '<span class="nofix">NO FIX</span>'}</td>
+      <td>${x.fixed ? `<span class="fix">${esc(x.fixed)}</span>` : '<span class="nofix">NO FIX</span>'}
+          <button class="mini" style="margin-left:6px" onclick="openFix(${i})">🛠 how?</button></td>
       <td><button class="mini acc" onclick="decide(this,'${esc(x.cve)}','accept')">✓ patched</button>
           <button class="mini dis" onclick="decide(this,'${esc(x.cve)}','dismiss')">✕ dismiss</button>
           <span class="decmsg"></span></td></tr>`;
@@ -297,6 +322,80 @@ async function decide(btn, cve, action){
     toast(`${cve} → ${action} recorded in feedback loop`);
   }catch(e){ msg.textContent = ' ✗ failed'; msg.className = 'dec-err'; }
 }
+
+/* ============ "How do I fix it?" — remediation popup ============ */
+let LAST_SCAN = [], LAST_SCAN_REPO = 'repo';
+
+const FIX_RECIPES = {
+  npm:      { cmd:(p,v)=>`npm install ${p}@${v}`,                 check:p=>`npm ls ${p}`,                        mins:5,  restart:'redeploy', note:'updates package.json + lockfile' },
+  pip:      { cmd:(p,v)=>`pip install "${p}==${v}"`,              check:p=>`pip show ${p} | grep -i version`,    mins:5,  restart:'redeploy', note:'pin the new version in requirements.txt' },
+  go:       { cmd:(p,v)=>`go get ${p}@${v} && go mod tidy`,       check:p=>`go list -m ${p}`,                    mins:10, restart:'redeploy' },
+  maven:    { cmd:(p,v)=>`# in pom.xml set <version>${v}</version> for ${p}, then:\nmvn clean install`, check:p=>`mvn dependency:tree | grep ${p}`, mins:15, restart:'redeploy' },
+  gradle:   { cmd:(p,v)=>`# in build.gradle set ${p} to ${v}, then:\n./gradlew clean build`, check:p=>`./gradlew dependencies | grep ${p}`, mins:15, restart:'redeploy' },
+  gem:      { cmd:(p,v)=>`bundle update ${p}`,                    check:p=>`bundle list | grep ${p}`,            mins:10, restart:'redeploy' },
+  cargo:    { cmd:(p,v)=>`cargo update -p ${p} --precise ${v}`,   check:p=>`cargo tree -p ${p}`,                 mins:15, restart:'redeploy' },
+  composer: { cmd:(p,v)=>`composer require ${p}:${v}`,            check:p=>`composer show ${p}`,                 mins:10, restart:'redeploy' },
+  nuget:    { cmd:(p,v)=>`dotnet add package ${p} --version ${v}`,check:p=>`dotnet list package | grep ${p}`,    mins:10, restart:'redeploy' },
+  pub:      { cmd:(p,v)=>`dart pub upgrade ${p}`,                 check:p=>`dart pub deps | grep ${p}`,          mins:10, restart:'redeploy' }
+};
+const FIX_DEFAULT = {
+  cmd:(p,v)=>'# upgrade '+p+' to '+v+' in your dependency manifest, then rebuild',
+  check:p=>'# re-run the VulnIntel scan and confirm '+p+' shows the new version',
+  mins:15, restart:'redeploy'
+};
+
+function openFix(i){
+  const x = LAST_SCAN[i]; if(!x) return;
+  const eco = (x.ecosystem || '').toLowerCase();
+  const r = FIX_RECIPES[eco] || FIX_DEFAULT;
+  const hasFix = !!x.fixed;
+  const repo = LAST_SCAN_REPO.replace(/^https?:\/\/github\.com\//,'').replace(/\/$/,'') || 'your repo';
+  const cmd = hasFix ? r.cmd(x.package, x.fixed)
+    : `# ${x.fix_note || 'no fixed version published yet'}\n# meanwhile: remove ${x.package}, limit its exposure, or watch for the vendor patch\n# re-check: re-run this scan after the next dependency update`;
+  const check = hasFix ? r.check(x.package)
+    : '# re-run the VulnIntel scan — the finding disappears once the package is patched';
+  $('#fxTitle').textContent = `Fix plan — ${x.cve}`;
+  $('#fxBody').innerHTML = `
+    <div class="fxrow"><b class="k">Broken:</b> <b>${esc(x.package)}</b> <span class="muted">@${esc(x.installed)}</span> on <b>${esc(repo)}</b>
+      · ${esc(eco || 'unknown ecosystem')}
+      · ${x.cvss != null ? `CVSS ${esc(x.cvss)}` : 'unscored'}
+      ${x.real_risk != null ? `· Real Risk <b>${num(x.real_risk)}</b>` : ''}</div>
+    <div class="fxrow"><b class="k">Fix:</b> ${hasFix
+      ? `upgrade to <span class="fix">${esc(x.fixed)}</span>${r.note ? ` <span class="muted">— ${esc(r.note)}</span>` : ''}`
+      : `<span class="nofix">no fixed version published yet</span> — mitigate, don't ignore`}</div>
+    <div class="fxrow"><b class="k">Command:</b>
+      <div class="fxcmd"><code id="fxCmd">${esc(cmd)}</code><button class="mini copybtn" onclick="copyFix(this,'fxCmd')">copy</button></div></div>
+    <div class="fxmeta">
+      <span class="chip">⏱ takes ~<b>${r.mins} min</b></span>
+      <span class="chip">restart: <b>${esc(r.restart)}</b></span>
+      <span class="chip">downtime: <b>none</b> (rolling deploy)</span>
+    </div>
+    <div class="fxrow"><b class="k">Check it worked:</b>
+      <div class="fxcmd"><code id="fxCheck">${esc(check)}</code><button class="mini copybtn" onclick="copyFix(this,'fxCheck')">copy</button></div></div>
+    ${x.summary ? `<div class="fxrow muted" style="font-size:12.5px">${esc(String(x.summary)).slice(0,240)}</div>` : ''}`;
+  $('#fxovl').classList.add('open');
+}
+
+function closeFix(){ $('#fxovl').classList.remove('open'); }
+
+function copyFix(btn, id){
+  const txt = document.getElementById(id).textContent;
+  const done = ok => { toast(ok ? 'copied to clipboard ✓' : 'copy blocked — select the text manually', ok);
+    btn.textContent = ok ? '✓ copied' : 'copy'; setTimeout(()=>{ btn.textContent = 'copy'; }, 1600); };
+  const fallback = () => {
+    const ta = document.createElement('textarea'); ta.value = txt;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    let ok = false; try{ ok = document.execCommand('copy'); }catch(e){}
+    document.body.removeChild(ta); done(ok);
+  };
+  if(navigator.clipboard && window.isSecureContext)
+    navigator.clipboard.writeText(txt).then(()=>done(true)).catch(fallback);
+  else fallback();
+}
+
+$('#fxovl').addEventListener('click', e => { if(e.target.id === 'fxovl') closeFix(); });
+document.addEventListener('keydown', e => { if(e.key === 'Escape') closeFix(); });
 
 /* ================= ask ================= */
 function miniMd(src){
