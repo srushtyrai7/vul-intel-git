@@ -33,6 +33,14 @@ import self_learning
 app.include_router(self_learning.router)
 
 # ---------------------------------------------------------------------------
+# Push alerts (Slack / Teams). Fires after a scan when findings meet the
+# severity threshold. Webhook comes from the SLACK_WEBHOOK_URL env var or the
+# request body; failures never affect the scan response.
+# ---------------------------------------------------------------------------
+import alerts
+app.include_router(alerts.router)
+
+# ---------------------------------------------------------------------------
 # Self-learning loop: analyst action vocabulary (lower-cased for matching)
 # ---------------------------------------------------------------------------
 PATCHED_ACTIONS = ("accept", "accepted", "patch", "patched")
@@ -58,6 +66,8 @@ class RepoScanRequest(BaseModel):
     asset_criticality: int = Field(10, ge=1, le=10)
     include_llm: bool = True
     include_rag: bool = True
+    notify: bool = True  # fire a Slack/Teams alert when the scan crosses the threshold
+    webhook_url: Optional[str] = None  # demo-friendly: per-request webhook wins over env
 
 @app.get("/")
 def home():
@@ -149,7 +159,7 @@ def dashboard():
 @app.post("/scan-repo")
 def scan_repo_route(body: RepoScanRequest):
     try:
-        return repo_scan.scan_repo(
+        result = repo_scan.scan_repo(
             repo_url=body.repo_url,
             asset_criticality=body.asset_criticality,
             include_llm=body.include_llm,
@@ -159,6 +169,13 @@ def scan_repo_route(body: RepoScanRequest):
         return {"error": str(exc)}
     except Exception as exc:
         return {"error": f"scan failed: {exc}"}
+    # Push alert after a successful scan — best effort, never fails the scan.
+    if isinstance(result, dict) and not result.get("error") and body.notify:
+        try:
+            alerts.maybe_alert(result, repo_url=body.repo_url, webhook_url=body.webhook_url)
+        except Exception:
+            pass
+    return result
 
 @app.get("/scan-repo")
 def scan_repo_get(repo_url: str, asset_criticality: int = 10):
