@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 
 import repo_scan
+import text_scan
 
 load_dotenv()
 sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
@@ -59,6 +60,14 @@ class RepoScanRequest(BaseModel):
     include_rag: bool = True
     notify: bool = True  # fire a Slack/Teams alert when the scan crosses the threshold
     webhook_url: Optional[str] = None  # demo-friendly: per-request webhook wins over env
+
+class TextScanRequest(BaseModel):
+    text: str = Field(..., min_length=3, max_length=200_000)  # pasted manifest / pip freeze / npm ls
+    asset_criticality: int = Field(10, ge=1, le=10)
+    include_llm: bool = False  # paste mode is the fast demo path — enrichments opt-in
+    include_rag: bool = False
+    notify: bool = True
+    webhook_url: Optional[str] = None
 
 @app.get("/")
 def home():
@@ -171,3 +180,22 @@ def scan_repo_route(body: RepoScanRequest):
 @app.get("/scan-repo")
 def scan_repo_get(repo_url: str, asset_criticality: int = 10):
     return scan_repo_route(RepoScanRequest(repo_url=repo_url, asset_criticality=asset_criticality))
+
+@app.post("/scan-text")
+def scan_text_route(body: TextScanRequest):
+    """Scan a pasted dependency list (requirements.txt / pip freeze / package.json /
+    npm ls --json). Same pipeline and result shape as /scan-repo — no repo needed."""
+    result = text_scan.scan_text(
+        text=body.text,
+        asset_criticality=body.asset_criticality,
+        include_llm=body.include_llm,
+        include_rag=body.include_rag,
+    )
+    # Push alert after a successful paste scan — best effort, never fails the scan.
+    if isinstance(result, dict) and not result.get("error") and body.notify:
+        try:
+            alerts.maybe_alert(result, repo_url=result.get("repo") or "pasted input",
+                               webhook_url=body.webhook_url)
+        except Exception:
+            pass
+    return result
