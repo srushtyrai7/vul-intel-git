@@ -103,6 +103,14 @@
   .dl{display:flex;gap:8px;flex-wrap:wrap}
   .dl div{border:1px solid var(--border);border-radius:8px;padding:6px 11px;font-size:11.5px;background:var(--panel2)}
   .dl b{color:var(--green);font-family:var(--mono)} .dl s{color:var(--red);text-decoration:none;font-family:var(--mono)}
+  .tgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:12px}
+  .tcard{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
+  .tadj{font-family:var(--mono);font-weight:800;font-size:20px}
+  .tadj.pos{color:var(--green)} .tadj.neg{color:var(--red)}
+  .meter{position:relative;height:10px;border-radius:5px;background:#1a2532;border:1px solid var(--border);margin-top:10px}
+  .meter::after{content:'';position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:var(--faint)}
+  .meter i{position:absolute;top:-4px;height:16px;width:5px;border-radius:2px;transform:translateX(-2px)}
+  .mlabels{display:flex;justify-content:space-between;color:var(--faint);font-size:10px;font-family:var(--mono);margin-top:4px}
 </style>
 </head>
 <body>
@@ -127,7 +135,7 @@
 
 <div class="wrap">
 <nav>
-  <a href="#scan">Scan</a><a href="#ask">Ask</a><a href="#assets">Assets</a><a href="#learn">Self-learning</a>
+  <a href="#scan">Scan</a><a href="#ask">Ask</a><a href="#assets">Assets</a><a href="#learn">Self-learning</a><a href="#triad">TRIAD engine</a>
 </nav>
 
 <!-- ============ SCAN ============ -->
@@ -140,6 +148,12 @@
     <button id="scanBtn">▶ Run scan</button>
     <span class="elapsed" id="scanEl"></span>
   </div>
+  <div class="row" style="margin-top:10px">
+    <input type="text" id="webhook" placeholder="Slack/Teams webhook URL — hooks.slack.com/… or ….webhook.office.com/…" style="flex:1;min-width:240px" spellcheck="false">
+    <button class="ghost mini" id="testAlert">🔔 send test</button>
+    <label class="muted"><input type="checkbox" id="autoAlert" checked> auto-alert after scan</label>
+  </div>
+  <div class="muted" id="alertMsg" style="margin-top:6px"></div>
   <div class="chips" id="scanChips"></div>
   <div id="scanOut"></div>
 </section>
@@ -174,6 +188,25 @@
 <section id="learn">
   <h2>Self-Learning Loop <span class="tag">GET /insights + GET /decisions · auto-detects when backend ships</span></h2>
   <div id="learnOut" class="muted">probing read-side endpoints…</div>
+</section>
+
+<!-- ============ TRIAD LEARNING ENGINE ============ -->
+<section id="triad">
+  <h2>TRIAD Learning Engine <span class="tag">POST /api/decisions · GET /api/learning/state · trust score per asset class</span></h2>
+  <div id="triadOut" class="muted">probing learning engine…</div>
+  <div id="triadForm" style="display:none;margin-top:14px">
+    <div class="row">
+      <input type="text" id="tVuln" value="CVE-2023-25813" spellcheck="false" style="flex:1;min-width:200px" title="Vulnerability id">
+      <span class="muted">risk</span>
+      <input type="number" id="tRisk" value="4.8" step="0.1" min="0" max="10" style="width:86px">
+      <input type="text" id="tClass" value="web-api" spellcheck="false" style="width:130px" title="Asset class">
+      <button class="mini dis" id="tDefer">✕ defer</button>
+      <button class="mini acc" id="tPatch">✓ patch now</button>
+      <button class="mini" id="tIncident" style="color:var(--amber)">⚠ incident</button>
+      <button class="ghost mini" id="tReset">reset</button>
+    </div>
+    <div id="tEvent"></div>
+  </div>
 </section>
 
 <footer>VulnIntel demo console · single file · zero dependencies · API base is configurable in the header</footer>
@@ -230,7 +263,9 @@ $('#scanBtn').addEventListener('click', async () => {
   try{
     const d = await api('/scan-repo', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({repo_url: $('#repo').value.trim(), asset_criticality: crit(),
-                            include_rag: $('#rag').checked, include_llm: $('#llm').checked})}, 220000);
+                            include_rag: $('#rag').checked, include_llm: $('#llm').checked,
+                            notify: $('#autoAlert').checked,
+                            webhook_url: $('#webhook').value.trim() || undefined})}, 220000);
     renderScan(d);
     toast(`Scan complete — ${d.summary.total_findings} findings in ${Math.round(d.summary.runtime_seconds)}s`);
   }catch(e){ $('#scanOut').innerHTML = `<div class="alert">Scan failed: ${esc(String(e)).slice(0,220)}</div>`; }
@@ -280,7 +315,8 @@ function renderScan(d){
     <div style="overflow-x:auto"><table><thead><tr><th class="num">#</th><th>Package</th><th>CVE</th><th class="num">CVSS</th>
       <th class="num">EPSS</th><th>Sev</th><th class="num">Real Risk</th><th>Fix</th><th>Feedback</th></tr></thead>
       <tbody>${rows || '<tr><td colspan="9" class="muted">no findings</td></tr>'}</tbody></table></div>
-    ${(d.notes||[]).length ? `<div class="alert">${d.notes.map(n=>'• '+esc(n)).join('<br>')}</div>` : ''}`;
+    ${(d.notes||[]).length ? `<div class="alert">${d.notes.map(n=>'• '+esc(n)).join('<br>')}</div>` : ''}
+    ${alertLine(d.alert)}`;
   refreshLearn();
 }
 
@@ -371,14 +407,27 @@ async function refreshLearn(){
   if(learnProbeBusy) return; learnProbeBusy = true;
   try{
     const out = $('#learnOut');
+    out.innerHTML = `<div class="muted">probing read-side endpoints…</div>`;
+    // Render free tier sleeps after ~15 min idle; a cold boot can take ~60s.
+    // Wait for the API to answer before probing, so a sleeping API can't
+    // produce a false "not deployed" card.
+    const t0 = Date.now();
+    while (Date.now() - t0 < 60000) {
+      try { await api('/', {}, 8000); break; }
+      catch(e) {
+        out.innerHTML = `<div class="muted">API is waking up (Render free-tier cold start)… waiting up to 60s</div>`;
+        await new Promise(r=>setTimeout(r, 2500));
+      }
+    }
     let ins = null, decs = null;
-    try{ ins = await api('/insights', {}, 20000); }catch(e){}
-    try{ decs = await api('/decisions', {}, 20000); }catch(e){}
+    try{ ins = await api('/insights', {}, 30000); }catch(e){}
+    try{ decs = await api('/decisions', {}, 30000); }catch(e){}
     if(!decs && !ins){
-      out.innerHTML = `<div class="alert"><b>Read-side not deployed yet.</b>
-        The write-side of the feedback loop is already live — every ✓/✕ button above records via <code>POST /decisions</code>.
-        But <code>GET /decisions</code> and <code>GET /insights</code> are not answering yet, so the loop can't be displayed.
-        <br><br>▸ Apply <code>main_selflearning_patch.py</code> to <code>main.py</code> and redeploy on Render — this panel lights up automatically, zero dashboard changes needed.</div>`;
+      out.innerHTML = `<div class="alert"><b>Read-side not answering.</b>
+        If the liveness dot at the top is red, the API is asleep or unreachable — give it a few seconds and press Re-check below.
+        If the dot is green and this persists, the deployed <code>main.py</code> is missing the read-side routes.
+        <br><br>▸ Backend fix: replace <code>main.py</code> with the merged version (self-learning included) and let Render redeploy.
+        <br><br><button onclick="refreshLearn()">Re-check</button></div>`;
       return;
     }
     const list = Array.isArray(decs) ? decs : ((decs && decs.decisions) || []);
@@ -404,6 +453,125 @@ async function refreshLearn(){
   } finally { learnProbeBusy = false; }
 }
 refreshLearn();
+
+/* ================= push alerts (Slack/Teams) ================= */
+const alertLine = a => !a ? '' : a.sent
+  ? `<div class="ok-box" style="margin-top:10px">🔔 ${esc(a.channel)} alert sent — ${a.count} finding(s) ≥ ${esc(a.threshold)} severity</div>`
+  : `<div class="muted" style="margin-top:8px">🔔 alert not sent: ${esc(a.reason || a.error || 'unknown')}</div>`;
+$('#webhook').value = localStorage.getItem('vi_webhook') || '';
+$('#webhook').addEventListener('change', e => localStorage.setItem('vi_webhook', e.target.value.trim()));
+$('#testAlert').addEventListener('click', async e => {
+  const btn = e.target; btn.disabled = true;
+  $('#alertMsg').textContent = 'sending test alert…';
+  try{
+    const r = await api('/api/alerts/test', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({webhook_url: $('#webhook').value.trim() || undefined})}, 30000);
+    $('#alertMsg').innerHTML = r.ok
+      ? `✓ test alert sent (${esc(r.channel)}) — check your ${r.channel === 'teams' ? 'Teams' : 'Slack'} channel`
+      : `✗ test failed: ${esc(r.error || ('HTTP ' + r.http_status))}`;
+    toast(r.ok ? 'test alert sent — check your channel' : 'test alert failed', r.ok);
+  }catch(err){ $('#alertMsg').textContent = '✗ ' + String(err).slice(0,120); }
+  finally{ btn.disabled = false; }
+});
+
+/* ================= TRIAD learning engine ================= */
+let triadBusy = false;
+const fmtAdj = v => (v > 0 ? '+' : '') + (+v).toFixed(2);
+const dcls = d => d === 'defer' ? 'critical' : d === 'patch_now' ? 'low' : d === 'incident_confirmed' ? 'high' : 'unscored';
+
+async function refreshTriad(){
+  if(triadBusy) return; triadBusy = true;
+  const out = $('#triadOut');
+  try{
+    // Same cold-start tolerance as the feedback loop: never judge the engine
+    // missing while the free-tier API is still waking up.
+    const t0 = Date.now();
+    while (Date.now() - t0 < 45000) {
+      try { await api('/', {}, 8000); break; }
+      catch(e){
+        out.innerHTML = '<div class="muted">API is waking up (Render free-tier cold start)…</div>';
+        await new Promise(r=>setTimeout(r, 2500));
+      }
+    }
+    let state, recent = [];
+    try{ state = await api('/api/learning/state', {}, 30000); }
+    catch(e){
+      const msg = String(e);
+      out.innerHTML = /HTTP 404/.test(msg)
+        ? `<div class="alert"><b>TRIAD engine not deployed yet.</b> Upload <code>self_learning.py</code> + the updated <code>main.py</code> to the repo and let Render redeploy.</div>`
+        : `<div class="alert"><b>Learning engine error:</b> ${esc(msg).slice(0,180)}<br>Most common cause: the SQL was never run — paste <code>supabase_learning_tables.sql</code> in Supabase → SQL Editor → Run.</div>`;
+      return;
+    }
+    try{ recent = await api('/api/learning/recent?limit=12', {}, 30000); }catch(e){}
+    $('#triadForm').style.display = '';
+    renderTriad(Array.isArray(state)?state:[], Array.isArray(recent)?recent:[]);
+  } finally { triadBusy = false; }
+}
+
+function adjMeter(adj){
+  const pct = Math.max(0, Math.min(100, ((adj + 2) / 4) * 100));
+  const col = adj < 0 ? 'var(--red)' : 'var(--green)';
+  return `<div class="meter"><i style="left:${pct}%;background:${col}"></i></div>
+    <div class="mlabels"><span>-2 calm down</span><span>0</span><span>+2 be bolder</span></div>`;
+}
+
+function renderTriad(state, recent){
+  const cards = state.length ? state.map(s => `
+    <div class="tcard">
+      <div class="row" style="justify-content:space-between">
+        <b>${esc(s.asset_class)}</b>
+        <span class="tadj ${s.adjustment < 0 ? 'neg' : 'pos'}">${fmtAdj(s.adjustment)}</span>
+      </div>
+      ${adjMeter(+s.adjustment || 0)}
+      <div class="muted" style="margin-top:8px">${esc(s.explanation || '')}</div>
+    </div>`).join('')
+    : `<div class="tcard muted">Nothing learned yet — send your first decision below and the trust score appears here instantly.</div>`;
+  const rows = recent.map(r => `<tr>
+    <td class="cve">${esc(r.vuln_id)}</td>
+    <td class="muted">${esc(r.asset_class || '')}</td>
+    <td><span class="sev ${dcls(r.decision)}">${esc(r.decision)}</span></td>
+    <td class="num">${num(r.real_risk, 2)}</td>
+    <td class="muted">${esc((r.created_at || '').replace('T', ' ').slice(0, 19))}</td></tr>`).join('');
+  $('#triadOut').innerHTML = `
+    <div class="ok-box"><b>TRIAD engine is live.</b> It learns a trust score per asset class from what the team actually does:
+    defer a high-risk bug → advice calms down · fast-patch a low-risk bug → advice gets bolder · confirmed incident → boldest (+1.2).</div>
+    <div class="tgrid">${cards}</div>
+    ${rows ? `<div style="overflow-x:auto;margin-top:14px"><table><thead><tr><th>CVE</th><th>Class</th><th>Decision</th><th class="num">Risk</th><th>When</th></tr></thead><tbody>${rows}</tbody></table></div>`
+           : `<div class="muted" style="margin-top:12px">No decisions recorded yet — the audit trail will appear here.</div>`}`;
+}
+
+async function triadDecide(btn, decision){
+  const vuln = $('#tVuln').value.trim(), risk = +$('#tRisk').value, cls = $('#tClass').value.trim() || 'default';
+  if(!vuln || isNaN(risk)) return toast('vuln id and real risk are required', false);
+  btn.disabled = true;
+  $('#tEvent').innerHTML = `<div class="muted"><span class="spin"></span> recording ${esc(decision)}…</div>`;
+  try{
+    const r = await api('/api/decisions', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({vuln_id: vuln, asset_class: cls, decision, real_risk: risk})}, 30000);
+    $('#tEvent').innerHTML = `<div class="ok-box">Learning event — <b>${esc(vuln)}</b> ${esc(decision)} @ risk ${esc(risk)}:
+      signal <b>${r.signal}</b> · score <b>${fmtAdj(r.old_adjustment)} → ${fmtAdj(r.new_adjustment)}</b>
+      <br><span class="muted">${esc(r.explanation || '')}</span></div>`;
+    toast(`trust score moved ${fmtAdj(r.old_adjustment)} → ${fmtAdj(r.new_adjustment)}`);
+    refreshTriad();
+  }catch(e){
+    $('#tEvent').innerHTML = `<div class="alert">${esc(String(e)).slice(0, 220)}</div>`;
+  } finally { btn.disabled = false; }
+}
+
+$('#tDefer').addEventListener('click', e => triadDecide(e.target, 'defer'));
+$('#tPatch').addEventListener('click', e => triadDecide(e.target, 'patch_now'));
+$('#tIncident').addEventListener('click', e => triadDecide(e.target, 'incident_confirmed'));
+$('#tReset').addEventListener('click', async e => {
+  e.target.disabled = true;
+  try{
+    await api('/api/learning/reset', {method:'POST'}, 30000);
+    $('#tEvent').innerHTML = '';
+    toast('Learning wiped — score back to 0, table empty');
+    refreshTriad();
+  }catch(err){ toast(String(err).slice(0, 90), false); }
+  finally{ e.target.disabled = false; }
+});
+refreshTriad();
 </script>
 </body>
 </html>
