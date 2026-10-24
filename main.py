@@ -24,15 +24,6 @@ app.add_middleware(
 from rag import ask
 
 # ---------------------------------------------------------------------------
-# TRIAD-style self-learning engine (teammate's design, adapted to VulnIntel).
-# Lives in self_learning.py; needs the learning_decisions + learning_state
-# tables in Supabase (see supabase_learning_tables.sql). Completely separate
-# from the dashboard feedback loop below — zero interference.
-# ---------------------------------------------------------------------------
-import self_learning
-app.include_router(self_learning.router)
-
-# ---------------------------------------------------------------------------
 # Push alerts (Slack / Teams). Fires after a scan when findings meet the
 # severity threshold. Webhook comes from the SLACK_WEBHOOK_URL env var or the
 # request body; failures never affect the scan response.
@@ -41,7 +32,7 @@ import alerts
 app.include_router(alerts.router)
 
 # ---------------------------------------------------------------------------
-# Self-learning loop: analyst action vocabulary (lower-cased for matching)
+# Feedback loop: analyst action vocabulary (lower-cased for matching)
 # ---------------------------------------------------------------------------
 PATCHED_ACTIONS = ("accept", "accepted", "patch", "patched")
 DISMISS_ACTIONS = ("dismiss", "dismissed", "not_applicable", "not-applicable")
@@ -76,7 +67,7 @@ def home():
 @app.post("/ask")
 def ask_route(payload: AskPayload):
     result = ask(payload.question, payload.asset_criticality)
-    # Self-learning loop: CVEs the team dismissed are demoted 50% in future
+    # Feedback loop: CVEs the team dismissed are demoted 50% in future
     # rankings. Best-effort by design — /ask must never fail because of the
     # feedback read, so any error here is silently ignored.
     try:
