@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VulnIntel — Real Risk Console</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#111823; --panel2:#0e1520; --border:#1e2a3a;
+    --text:#dbe4ee; --dim:#8296ad; --faint:#5b6b80;
+    --cyan:#22d3ee; --green:#34d399; --red:#f87171; --amber:#fbbf24;
+    --violet:#a78bfa; --mono:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font:14px/1.55 -apple-system,'Segoe UI',Roboto,Inter,sans-serif;padding-bottom:60px}
+  .wrap{max-width:1240px;margin:0 auto;padding:0 20px}
+  header{border-bottom:1px solid var(--border);background:linear-gradient(180deg,#0d131c,#0b0f14);padding:18px 0 14px}
+  .brand{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  .brand h1{font-size:21px;letter-spacing:.3px}
+  .brand h1 b{color:var(--cyan)}
+  .formula{color:var(--dim);font-family:var(--mono);font-size:12px}
+  .formula b{color:var(--amber);font-weight:600}
+  .statusline{display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap}
+  .pill{display:inline-flex;gap:7px;align-items:center;border:1px solid var(--border);border-radius:999px;padding:3px 11px;font-size:12px;color:var(--dim);background:var(--panel2)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--faint)}
+  .dot.ok{background:var(--green);box-shadow:0 0 6px var(--green)}
+  .dot.bad{background:var(--red)}
+  .cfg{margin-left:auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .cfg input[type=text]{width:290px}
+  input[type=text],input[type=number],select,textarea{
+    background:var(--panel2);border:1px solid var(--border);border-radius:8px;color:var(--text);
+    padding:7px 10px;font-size:13px;outline:none}
+  input:focus,textarea:focus,select:focus{border-color:var(--cyan)}
+  input[type=range]{accent-color:var(--cyan);width:130px}
+  .crit-val{font-family:var(--mono);color:var(--amber);width:26px;display:inline-block;text-align:center}
+  nav{display:flex;gap:4px;padding:10px 0 0}
+  nav a{color:var(--dim);text-decoration:none;font-size:12.5px;padding:5px 12px;border-radius:8px 8px 0 0}
+  nav a:hover{color:var(--cyan);background:var(--panel2)}
+  section{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px;margin-top:18px}
+  section h2{font-size:14px;text-transform:uppercase;letter-spacing:1.2px;color:var(--dim);margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  section h2 .tag{font-size:10.5px;letter-spacing:.4px;text-transform:none;padding:2px 9px;border-radius:999px;border:1px solid var(--border);color:var(--faint);font-weight:400}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  button{background:var(--cyan);border:none;color:#04222a;font-weight:700;font-size:13px;
+    padding:9px 18px;border-radius:8px;cursor:pointer;transition:filter .15s}
+  button:hover{filter:brightness(1.12)}
+  button:disabled{opacity:.45;cursor:wait}
+  button.ghost{background:transparent;border:1px solid var(--border);color:var(--dim);font-weight:500;padding:6px 12px}
+  button.ghost:hover{color:var(--text);border-color:var(--cyan)}
+  button.mini{padding:3px 9px;font-size:11px;border-radius:6px;background:var(--panel2);border:1px solid var(--border);color:var(--dim);font-weight:600}
+  button.mini:hover{color:var(--text);border-color:var(--cyan)}
+  button.mini.acc:hover{border-color:var(--green);color:var(--green)}
+  button.mini.dis:hover{border-color:var(--red);color:var(--red)}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+  .chip{border:1px solid var(--border);border-radius:8px;padding:5px 12px;font-size:12px;background:var(--panel2);color:var(--dim)}
+  .chip b{color:var(--text);font-family:var(--mono)}
+  .chip.crit b{color:var(--red)} .chip.high b{color:var(--amber)} .chip.med b{color:var(--cyan)}
+  .chip.rag b{color:var(--violet)} .chip.g b{color:var(--green)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{color:var(--faint);text-transform:uppercase;letter-spacing:.7px;font-size:10.5px;text-align:left;
+    padding:8px 10px;border-bottom:1px solid var(--border)}
+  td{padding:8px 10px;border-bottom:1px solid #16202e;vertical-align:middle}
+  tr:hover td{background:#131c29}
+  td.num,th.num{font-family:var(--mono);text-align:right}
+  .cve{font-family:var(--mono);color:var(--cyan)}
+  .sev{display:inline-block;padding:1px 8px;border-radius:5px;font-size:10.5px;font-weight:700;letter-spacing:.5px}
+  .sev.critical{background:#3d1216;color:#ff8f8f}.sev.high{background:#3a2a10;color:var(--amber)}
+  .sev.medium{background:#0e2f38;color:var(--cyan)}.sev.low{background:#152a1e;color:var(--green)}
+  .sev.unscored{background:#1a2230;color:var(--faint)}
+  .nofix{color:var(--red);font-weight:700;font-size:11px;letter-spacing:.5px}
+  .fix{font-family:var(--mono);color:var(--green)}
+  .bar{height:5px;border-radius:3px;background:#1a2532;margin-top:4px;overflow:hidden;width:110px;display:block}
+  .bar i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,var(--cyan),var(--amber))}
+  .risk{font-family:var(--mono);font-weight:700;color:var(--amber)}
+  tr.top td{background:#241c0e;border-bottom:1px solid #4a3a12}
+  .rank1{font-family:var(--mono)}
+  tr.top .rank1{color:var(--amber);font-weight:800}
+  .note10{color:var(--violet);font-size:10.5px;display:block}
+  .dec-ok{color:var(--green);font-size:11px;font-family:var(--mono)}
+  .dec-err{color:var(--red);font-size:11px;font-family:var(--mono)}
+  .grid2{display:grid;grid-template-columns:1.25fr 1fr;gap:18px}
+  @media(max-width:900px){.grid2{grid-template-columns:1fr}}
+  textarea{width:100%;min-height:70px;resize:vertical;font:13px/1.5 inherit}
+  .answer{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-top:12px}
+  .answer h3,.answer h4{margin:10px 0 6px;color:var(--cyan);font-size:13.5px}
+  .answer p{margin:7px 0}
+  .answer code{font-family:var(--mono);background:#0a1a1f;color:var(--cyan);padding:1px 6px;border-radius:5px;font-size:12px}
+  .answer table{margin:8px 0;border:1px solid var(--border)}
+  .answer td,.answer th{padding:5px 10px}
+  .answer li{margin:4px 0 4px 18px}
+  .cvchips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+  .cvchips span{font-family:var(--mono);font-size:11.5px;border:1px solid var(--border);border-radius:6px;padding:2px 9px;color:var(--violet);background:var(--panel2)}
+  .muted{color:var(--faint);font-size:12px}
+  .alert{border:1px solid #4a3a12;background:#221b0c;border-radius:10px;padding:14px 16px;color:#e8d9a8;font-size:12.5px;margin-top:12px}
+  .alert code{font-family:var(--mono);color:var(--amber)}
+  .ok-box{border:1px solid #14432f;background:#0d2419;border-radius:10px;padding:14px 16px;color:#b8ecd4;font-size:12.5px;margin-top:12px}
+  .spin{width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--cyan);border-radius:50%;
+    display:inline-block;vertical-align:-2px;animation:sp .8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .elapsed{font-family:var(--mono);color:var(--dim);font-size:12px}
+  .formrow{display:grid;grid-template-columns:1.4fr 1fr 90px 1fr auto;gap:8px;margin-top:12px}
+  @media(max-width:760px){.formrow{grid-template-columns:1fr 1fr}}
+  footer{margin-top:26px;color:var(--faint);font-size:11.5px;text-align:center;font-family:var(--mono)}
+  .dl{display:flex;gap:8px;flex-wrap:wrap}
+  .dl div{border:1px solid var(--border);border-radius:8px;padding:6px 11px;font-size:11.5px;background:var(--panel2)}
+  .dl b{color:var(--green);font-family:var(--mono)} .dl s{color:var(--red);text-decoration:none;font-family:var(--mono)}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="brand">
+      <h1>Vuln<b>Intel</b> — Real Risk Console</h1>
+      <span class="formula">Real&nbsp;Risk = <b>CVSS × EPSS × Asset&nbsp;Criticality</b>&nbsp;&nbsp;·&nbsp;&nbsp;discovery = OSV.dev exact match · zero-AI ranking</span>
+    </div>
+    <div class="statusline">
+      <span class="pill"><span class="dot" id="dot"></span><span id="svc">checking API…</span></span>
+      <span class="pill" id="lat"></span>
+      <div class="cfg">
+        <input type="text" id="apiBase" spellcheck="false" title="API base URL">
+        <span class="muted">criticality</span>
+        <input type="range" id="crit" min="1" max="10" value="8">
+        <span class="crit-val" id="critV">8</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+<nav>
+  <a href="#scan">Scan</a><a href="#ask">Ask</a><a href="#assets">Assets</a><a href="#learn">Self-learning</a>
+</nav>
+
+<!-- ============ SCAN ============ -->
+<section id="scan">
+  <h2>Repo Scan <span class="tag">POST /scan-repo · OSV.dev → CVSS v3.1 → live EPSS → pgvector RAG</span></h2>
+  <div class="row">
+    <input type="text" id="repo" style="flex:1;min-width:280px" value="https://github.com/appsecco/dvna" spellcheck="false">
+    <label class="muted"><input type="checkbox" id="rag" checked> RAG enrichment</label>
+    <label class="muted" title="Uses Groq credits"><input type="checkbox" id="llm"> LLM advisory</label>
+    <button id="scanBtn">▶ Run scan</button>
+    <span class="elapsed" id="scanEl"></span>
+  </div>
+  <div class="chips" id="scanChips"></div>
+  <div id="scanOut"></div>
+</section>
+
+<div class="grid2">
+  <!-- ============ ASK ============ -->
+  <section id="ask">
+    <h2>Ask the Prioritizer <span class="tag">POST /ask · RAG over pgvector</span></h2>
+    <textarea id="q">Which CVE should I patch first for an internet-facing API server?</textarea>
+    <div class="row" style="margin-top:10px">
+      <button id="askBtn">▶ Ask</button>
+      <span class="elapsed" id="askEl"></span>
+    </div>
+    <div id="askOut"></div>
+  </section>
+
+  <!-- ============ ASSETS ============ -->
+  <section id="assets">
+    <h2>Asset Inventory <span class="tag">GET /assets · criticality feeds the risk formula</span></h2>
+    <div id="assetsOut" class="muted">loading…</div>
+    <div class="formrow">
+      <input type="text" id="aName" placeholder="Name (e.g. Payments DB)">
+      <input type="text" id="aType" placeholder="Type (e.g. Database)">
+      <input type="number" id="aCrit" min="1" max="10" placeholder="Crit 1-10">
+      <select id="aExp"><option value="">exposure…</option><option value="external">external</option><option value="internal">internal</option></select>
+      <button class="ghost" id="addAsset">+ Add</button>
+    </div>
+  </section>
+</div>
+
+<!-- ============ SELF-LEARNING ============ -->
+<section id="learn">
+  <h2>Self-Learning Loop <span class="tag">GET /insights + GET /decisions · auto-detects when backend ships</span></h2>
+  <div id="learnOut" class="muted">probing read-side endpoints…</div>
+</section>
+
+<footer>VulnIntel demo console · single file · zero dependencies · API base is configurable in the header</footer>
+</div>
+
+<script>
+/* ================= core ================= */
+const $ = s => document.querySelector(s);
+$('#apiBase').value = localStorage.getItem('vi_base') || 'https://vuln-intel-api-dev2.onrender.com';
+$('#apiBase').addEventListener('change', e => { localStorage.setItem('vi_base', e.target.value.trim()); liveness(); });
+$('#crit').addEventListener('input', e => $('#critV').textContent = e.target.value);
+const apiBase = () => ($('#apiBase').value || '').replace(/\/+$/, '');
+const crit = () => +$('#crit').value;
+
+function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function num(v, d=4){ return v == null ? '—' : (+v).toFixed(d); }
+async function api(path, opts={}, timeout=60000){
+  const ac = new AbortController(); const t = setTimeout(()=>ac.abort(), timeout);
+  try{
+    const r = await fetch(apiBase() + path, {...opts, signal: ac.signal});
+    const body = await r.json().catch(()=> ({}));
+    if(!r.ok) throw new Error(`HTTP ${r.status} ${JSON.stringify(body).slice(0,160)}`);
+    return body;
+  } finally { clearTimeout(t); }
+}
+function toast(msg, ok=true){
+  const el = document.createElement('div');
+  el.style.cssText = `position:fixed;bottom:18px;right:18px;z-index:99;padding:10px 16px;border-radius:9px;font-size:12.5px;
+    border:1px solid ${ok?'#14432f':'#5b2020'};background:${ok?'#0d2419':'#2a1214'};color:${ok?'#b8ecd4':'#ffb4b4'};max-width:340px`;
+  el.textContent = msg; document.body.appendChild(el); setTimeout(()=>el.remove(), 4200);
+}
+
+/* ================= liveness ================= */
+async function liveness(){
+  $('#dot').className = 'dot'; $('#svc').textContent = 'checking API…'; $('#lat').textContent = '';
+  const t0 = performance.now();
+  try{
+    const d = await api('/', {}, 30000);
+    const ms = Math.round(performance.now() - t0);
+    $('#dot').className = 'dot ok'; $('#svc').textContent = d.service || 'api online'; $('#lat').textContent = ms + ' ms';
+  }catch(e){
+    $('#dot').className = 'dot bad'; $('#svc').textContent = 'API unreachable'; $('#lat').textContent = String(e).slice(0,60);
+  }
+}
+liveness(); setInterval(liveness, 30000);
+
+/* ================= scan ================= */
+$('#scanBtn').addEventListener('click', async () => {
+  const btn = $('#scanBtn'); btn.disabled = true;
+  const t0 = performance.now();
+  $('#scanEl').innerHTML = '<span class="spin"></span> scanning… 0s';
+  const tick = setInterval(() => $('#scanEl').innerHTML = `<span class="spin"></span> scanning… ${Math.round((performance.now()-t0)/1000)}s`, 500);
+  $('#scanChips').innerHTML = ''; $('#scanOut').innerHTML = '';
+  try{
+    const d = await api('/scan-repo', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({repo_url: $('#repo').value.trim(), asset_criticality: crit(),
+                            include_rag: $('#rag').checked, include_llm: $('#llm').checked})}, 220000);
+    renderScan(d);
+    toast(`Scan complete — ${d.summary.total_findings} findings in ${Math.round(d.summary.runtime_seconds)}s`);
+  }catch(e){ $('#scanOut').innerHTML = `<div class="alert">Scan failed: ${esc(String(e)).slice(0,220)}</div>`; }
+  finally{ clearInterval(tick); btn.disabled = false; }
+});
+
+function renderScan(d){
+  const s = d.summary || {}, sev = s.by_severity || {}, rag = d.rag_related || {};
+  $('#scanChips').innerHTML = `
+    <span class="chip">deps <b>${d.dependencies ? `${d.dependencies.total}/${d.dependencies.pinned} pinned` : '—'}</b></span>
+    <span class="chip">unpinned <b>${(d.dependencies && d.dependencies.unpinned || []).length}</b></span>
+    <span class="chip">findings <b>${s.total_findings ?? '—'}</b></span>
+    ${sev.critical ? `<span class="chip crit">critical <b>${sev.critical}</b></span>` : ''}
+    ${sev.high ? `<span class="chip high">high <b>${sev.high}</b></span>` : ''}
+    ${sev.medium ? `<span class="chip med">medium <b>${sev.medium}</b></span>` : ''}
+    ${sev.low ? `<span class="chip g">low <b>${sev.low}</b></span>` : ''}
+    ${s.runtime_seconds != null ? `<span class="chip">runtime <b>${num(s.runtime_seconds,1)}s</b></span>` : ''}
+    <span class="chip rag">RAG <b>${rag.enabled ? (() => {
+      const rel = rag.related || {};
+      const keys = Object.keys(rel);
+      const total = Array.isArray(rel) ? rel.length : keys.reduce((n,k)=>n+((rel[k]||[]).length),0);
+      return `on · ${total} matches / ${keys.length} CVEs`;
+    })() : 'off'}</b></span>`;
+
+  const f = [...(d.findings||[])].sort((a,b) => (b.real_risk ?? -1) - (a.real_risk ?? -1));
+  const sevOf = x => x.severity || (x.cvss == null ? 'unscored'
+    : x.cvss >= 9 ? 'critical' : x.cvss >= 7 ? 'high' : x.cvss >= 4 ? 'medium' : 'low');
+  const rows = f.map((x,i) => {
+    const isTop = i === 0 && x.real_risk != null;
+    const cvss10 = x.cvss === 10;
+    return `<tr class="${isTop?'top':''}">
+      <td class="num rank1">${i+1}</td>
+      <td><b>${esc(x.package)}</b> <span class="muted">@${esc(x.installed)}</span></td>
+      <td><span class="cve">${esc(x.cve)}</span>${cvss10?`<span class="note10">CVSS 10 but EPSS ${num((x.epss||0)*100,2)}% → ranked ${i+1}</span>`:''}</td>
+      <td class="num">${x.cvss ?? '—'}</td>
+      <td class="num">${x.epss==null?'—':num(x.epss*100,2)+'%'}</td>
+      <td><span class="sev ${esc(sevOf(x).toLowerCase())}">${esc(sevOf(x))}</span></td>
+      <td class="num"><span class="risk">${x.real_risk==null?'—':num(x.real_risk)}</span>
+        <span class="bar"><i style="width:${Math.min(100,(x.real_risk||0)/5*100)}%"></i></span></td>
+      <td>${x.fixed ? `<span class="fix">${esc(x.fixed)}</span>` : '<span class="nofix">NO FIX</span>'}</td>
+      <td><button class="mini acc" onclick="decide(this,'${esc(x.cve)}','accept')">✓ patched</button>
+          <button class="mini dis" onclick="decide(this,'${esc(x.cve)}','dismiss')">✕ dismiss</button>
+          <span class="decmsg"></span></td></tr>`;
+  }).join('');
+
+  $('#scanOut').innerHTML = `
+    <div style="overflow-x:auto"><table><thead><tr><th class="num">#</th><th>Package</th><th>CVE</th><th class="num">CVSS</th>
+      <th class="num">EPSS</th><th>Sev</th><th class="num">Real Risk</th><th>Fix</th><th>Feedback</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="9" class="muted">no findings</td></tr>'}</tbody></table></div>
+    ${(d.notes||[]).length ? `<div class="alert">${d.notes.map(n=>'• '+esc(n)).join('<br>')}</div>` : ''}`;
+  refreshLearn();
+}
+
+/* feedback -> POST /decisions {cve_id, action} */
+async function decide(btn, cve, action){
+  const msg = btn.closest('td').querySelector('.decmsg');
+  msg.textContent = '…'; msg.className = 'decmsg';
+  try{
+    await api('/decisions', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({cve_id: cve, action})}, 30000);
+    msg.textContent = ` ✓ ${action}`; msg.className = 'dec-ok';
+    toast(`${cve} → ${action} recorded in feedback loop`);
+    refreshLearn();
+  }catch(e){ msg.textContent = ' ✗ failed'; msg.className = 'dec-err'; }
+}
+
+/* ================= ask ================= */
+function miniMd(src){
+  let h = esc(src);
+  h = h.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  const lines = h.split('\n'); let out = '', tbl = [], inList = false;
+  const flushTbl = () => { if(!tbl.length) return;
+    out += '<table>' + tbl.map((r,i)=> i===0
+      ? `<thead><tr>${r.map(c=>`<th>${c}</th>`).join('')}</tr></thead>`
+      : `<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('') + '</table>'; tbl = []; };
+  const closeList = () => { if(inList){ out += '</ul>'; inList = false; } };
+  for(const ln of lines){
+    const t = ln.trim();
+    if(/^\|/.test(t) && /\|\s*$/.test(t)){
+      const cells = t.split('|').slice(1,-1).map(c=>c.trim());
+      if(cells.every(c=>/^:?-{2,}:?$/.test(c))) continue;
+      tbl.push(cells); continue;
+    }
+    flushTbl();
+    if(/^#{1,6}\s/.test(t)){ closeList(); out += `<h3>${t.replace(/^#{1,6}\s/,'')}</h3>`; }
+    else if(/^[-*•]\s/.test(t)){ if(!inList){ out += '<ul>'; inList = true; } out += `<li>${t.replace(/^[-*•]\s/,'')}</li>`; }
+    else if(t === ''){ closeList(); }
+    else { closeList(); out += `<p>${t}</p>`; }
+  }
+  flushTbl(); closeList();
+  return out.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
+}
+
+$('#askBtn').addEventListener('click', async () => {
+  const btn = $('#askBtn'); btn.disabled = true;
+  const t0 = performance.now();
+  $('#askEl').innerHTML = '<span class="spin"></span> thinking… 0s';
+  const tick = setInterval(() => $('#askEl').innerHTML = `<span class="spin"></span> thinking… ${Math.round((performance.now()-t0)/1000)}s`, 500);
+  $('#askOut').innerHTML = '';
+  try{
+    const d = await api('/ask', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({question: $('#q').value.trim(), asset_criticality: crit()})}, 120000);
+    $('#askEl').textContent = `answered in ${Math.round((performance.now()-t0)/1000)}s`;
+    const ranked = (d.ranked_cves||[]).map(c => esc(typeof c === 'string' ? c : (c.cve_id || c.cve || JSON.stringify(c))));
+    $('#askOut').innerHTML = `<div class="answer">${miniMd(d.answer||'')}</div>
+      ${ranked.length ? `<div class="cvchips">${ranked.map(c=>`<span>${c}</span>`).join('')}</div>` : ''}`;
+  }catch(e){ $('#askOut').innerHTML = `<div class="alert">Ask failed: ${esc(String(e)).slice(0,200)}</div>`; }
+  finally{ clearInterval(tick); btn.disabled = false; }
+});
+
+/* ================= assets ================= */
+async function loadAssets(){
+  try{
+    const list = await api('/assets', {}, 30000);
+    const arr = Array.isArray(list) ? list : (list.assets || []);
+    const rows = arr.map(a => `<tr>
+      <td><b>${esc(a.name)}</b></td><td class="muted">${esc(a.type)}</td>
+      <td class="num" style="color:var(--amber);font-family:var(--mono)">${esc(a.criticality)}</td>
+      <td class="muted">${esc(a.exposure||'—')}</td></tr>`).join('');
+    $('#assetsOut').innerHTML = `<table><thead><tr><th>Asset</th><th>Type</th><th class="num">Crit</th><th>Exposure</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }catch(e){ $('#assetsOut').innerHTML = `<div class="alert">${esc(String(e)).slice(0,140)}</div>`; }
+}
+$('#addAsset').addEventListener('click', async () => {
+  const name = $('#aName').value.trim(), type = $('#aType').value.trim(), c = +$('#aCrit').value;
+  if(!name || !type || !c) return toast('name, type and criticality are required', false);
+  try{
+    await api('/assets', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name, type, criticality: c, exposure: $('#aExp').value || undefined})}, 30000);
+    $('#aName').value = $('#aType').value = $('#aCrit').value = ''; $('#aExp').value = '';
+    toast(`Asset "${name}" added`); loadAssets();
+  }catch(e){ toast(String(e).slice(0,90), false); }
+});
+loadAssets();
+
+/* ================= self-learning (auto-detect) ================= */
+let learnProbeBusy = false;
+async function refreshLearn(){
+  if(learnProbeBusy) return; learnProbeBusy = true;
+  try{
+    const out = $('#learnOut');
+    let ins = null, decs = null;
+    try{ ins = await api('/insights', {}, 20000); }catch(e){}
+    try{ decs = await api('/decisions', {}, 20000); }catch(e){}
+    if(!decs && !ins){
+      out.innerHTML = `<div class="alert"><b>Read-side not deployed yet.</b>
+        The write-side of the feedback loop is already live — every ✓/✕ button above records via <code>POST /decisions</code>.
+        But <code>GET /decisions</code> and <code>GET /insights</code> are not answering yet, so the loop can't be displayed.
+        <br><br>▸ Apply <code>main_selflearning_patch.py</code> to <code>main.py</code> and redeploy on Render — this panel lights up automatically, zero dashboard changes needed.</div>`;
+      return;
+    }
+    const list = Array.isArray(decs) ? decs : ((decs && decs.decisions) || []);
+    const isP = a => { a=(a||'').toLowerCase(); return a.startsWith('accept')||a.startsWith('patch'); };
+    const isD = a => { a=(a||'').toLowerCase(); return a.startsWith('dismiss')||a==='not_applicable'||a==='not-applicable'; };
+    const acc  = (ins && ins.patched) || list.filter(d=>isP(d.action)).map(d=>d.cve_id);
+    const dis  = (ins && ins.dismissed) || list.filter(d=>isD(d.action)).map(d=>d.cve_id);
+    out.innerHTML = `
+      <div class="ok-box"><b>Loop is live.</b> Analyst decisions recorded from the scan table flow back here —
+      the dismissed set is the demotion signal feeding future rankings.</div>
+      <div class="chips">
+        <span class="chip g">patched <b>${(acc||[]).length}</b></span>
+        <span class="chip crit">dismissed <b>${(dis||[]).length}</b></span>
+        <span class="chip">recent decisions <b>${list.length}</b></span>
+        ${ins && ins.note ? `<span class="chip">${esc(ins.note)}</span>` : ''}
+      </div>
+      ${(acc&&acc.length) ? `<div class="dl" style="margin-bottom:8px">${acc.slice(0,12).map(c=>`<div><b>✓</b> ${esc(c)}</div>`).join('')}</div>` : ''}
+      ${(dis&&dis.length) ? `<div class="dl" style="margin-bottom:8px">${dis.slice(0,12).map(c=>`<div><s>✕</s> ${esc(c)}</div>`).join('')}</div>` : ''}
+      ${list.length ? `<table><thead><tr><th>CVE</th><th>Action</th><th>Recorded</th></tr></thead><tbody>
+        ${list.slice(0,10).map(d=>`<tr><td class="cve">${esc(d.cve_id)}</td><td>${esc(d.action)}</td>
+          <td class="muted">${esc((d.created_at||'').replace('T',' ').slice(0,19))}</td></tr>`).join('')}
+        </tbody></table>` : ''}`;
+  } finally { learnProbeBusy = false; }
+}
+refreshLearn();
+</script>
+</body>
+</html>
