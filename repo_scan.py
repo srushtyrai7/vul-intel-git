@@ -597,7 +597,8 @@ def fetch_epss(cve_ids):
 def gemini_embed(text):
     url = (f"https://generativelanguage.googleapis.com/v1beta/"
            f"{EMBEDDING_MODEL}:embedContent?key={GEMINI_API_KEY}")
-    resp = _post(url, {"content": {"parts": [{"text": text}]}})
+    resp = _post(url, {"content": {"parts": [{"text": text}]},
+                       "outputDimensionality": 768})
     if resp.status_code != 200:
         raise RuntimeError(f"Gemini embedding HTTP {resp.status_code}: {resp.text[:160]}")
     return resp.json()["embedding"]["values"]
