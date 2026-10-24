@@ -24,6 +24,15 @@ app.add_middleware(
 from rag import ask
 
 # ---------------------------------------------------------------------------
+# TRIAD-style self-learning engine (teammate's design, adapted to VulnIntel).
+# Lives in self_learning.py; needs the learning_decisions + learning_state
+# tables in Supabase (see supabase_learning_tables.sql). Completely separate
+# from the dashboard feedback loop below — zero interference.
+# ---------------------------------------------------------------------------
+import self_learning
+app.include_router(self_learning.router)
+
+# ---------------------------------------------------------------------------
 # Self-learning loop: analyst action vocabulary (lower-cased for matching)
 # ---------------------------------------------------------------------------
 PATCHED_ACTIONS = ("accept", "accepted", "patch", "patched")
@@ -154,4 +163,3 @@ def scan_repo_route(body: RepoScanRequest):
 @app.get("/scan-repo")
 def scan_repo_get(repo_url: str, asset_criticality: int = 10):
     return scan_repo_route(RepoScanRequest(repo_url=repo_url, asset_criticality=asset_criticality))
-
