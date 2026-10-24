@@ -1,6 +1,7 @@
 import os
+from datetime import datetime, timezone
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client
 from pydantic import BaseModel, Field
@@ -21,6 +22,12 @@ app.add_middleware(
 )
 
 from rag import ask
+
+# ---------------------------------------------------------------------------
+# Self-learning loop: analyst action vocabulary (lower-cased for matching)
+# ---------------------------------------------------------------------------
+PATCHED_ACTIONS = ("accept", "accepted", "patch", "patched")
+DISMISS_ACTIONS = ("dismiss", "dismissed", "not_applicable", "not-applicable")
 
 class Asset(BaseModel):
     name: str
@@ -49,7 +56,26 @@ def home():
 
 @app.post("/ask")
 def ask_route(payload: AskPayload):
-    return ask(payload.question, payload.asset_criticality)
+    result = ask(payload.question, payload.asset_criticality)
+    # Self-learning loop: CVEs the team dismissed are demoted 50% in future
+    # rankings. Best-effort by design — /ask must never fail because of the
+    # feedback read, so any error here is silently ignored.
+    try:
+        rows = (sb.table("decisions")
+                .select("cve_id,action").limit(500).execute().data) or []
+        dismissed = {r.get("cve_id") for r in rows
+                     if (r.get("action") or "").lower() in DISMISS_ACTIONS}
+        ranked = result.get("ranked_cves") if isinstance(result, dict) else None
+        if dismissed and ranked:
+            for c in ranked:
+                if c.get("cve_id") in dismissed:
+                    c["real_risk"] = round((c.get("real_risk") or 0) * 0.5, 4)
+                    c["demoted_by_feedback"] = True
+            ranked.sort(key=lambda c: -(c.get("real_risk") or 0))
+            result["feedback_applied"] = True
+    except Exception:
+        pass
+    return result
 
 @app.get("/assets")
 def list_assets():
@@ -66,6 +92,45 @@ def record_decision(d: Decision):
         "asset_id": d.asset_id,
         "action": d.action,
     }).execute().data
+
+@app.get("/decisions")
+def list_decisions(limit: int = 50):
+    """Read-side of the feedback loop: latest analyst decisions first."""
+    try:
+        rows = (sb.table("decisions")
+                .select("id,cve_id,asset_id,action,created_at")
+                .order("created_at", desc=True)
+                .limit(min(limit, 200))
+                .execute().data) or []
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"decisions read failed: {e}")
+    return rows
+
+@app.get("/insights")
+def insights():
+    """Feedback signal: what the team accepted (patched) vs dismissed."""
+    try:
+        rows = (sb.table("decisions")
+                .select("cve_id,action,created_at")
+                .order("created_at", desc=True)
+                .limit(500)
+                .execute().data) or []
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"insights read failed: {e}")
+
+    patched = [r.get("cve_id") for r in rows
+               if (r.get("action") or "").lower() in PATCHED_ACTIONS]
+    dismissed = [r.get("cve_id") for r in rows
+                 if (r.get("action") or "").lower() in DISMISS_ACTIONS]
+    return {
+        "patched": patched,
+        "dismissed": dismissed,
+        "patched_count": len(patched),
+        "dismissed_count": len(dismissed),
+        "total_decisions": len(rows),
+        "note": "dismissed CVEs are demoted 50% in future /ask rankings",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 @app.get("/dashboard")
 def dashboard():
@@ -89,3 +154,4 @@ def scan_repo_route(body: RepoScanRequest):
 @app.get("/scan-repo")
 def scan_repo_get(repo_url: str, asset_criticality: int = 10):
     return scan_repo_route(RepoScanRequest(repo_url=repo_url, asset_criticality=asset_criticality))
+
